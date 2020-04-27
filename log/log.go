@@ -31,3 +31,15 @@ func init() {
 	Error = log.New(io.MultiWriter(file, os.Stderr), "ERROR: ", log.Ldate|log.Ltime|log.Lshortfile)
 
 }
+
+func FailOnErr(err error, msg string) {
+	if err != nil {
+		Error.Fatalf("%s:%s", msg, err)
+	}
+}
+
+func FailOnWarn(err error, msg string) {
+	if err != nil {
+		Warn.Printf("%s:%s", msg, err)
+	}
+}
