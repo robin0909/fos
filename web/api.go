@@ -20,10 +20,11 @@ import (
 
 type FosServer struct {
 	dataDir string // 数据文件存放位置
+	address string
 }
 
-func New(dataDir string) *FosServer {
-	return &FosServer{dataDir: dataDir}
+func New(dataDir, address string) *FosServer {
+	return &FosServer{dataDir: dataDir, address: address}
 }
 
 // 运行 obj api 服务
@@ -32,7 +33,7 @@ func (fs *FosServer) RunFos() {
 	http.HandleFunc("/objects/", fs.handleObjects)
 	// restful bucket api
 	http.HandleFunc("/bucket/", fs.handleBucket)
-	err := http.ListenAndServe(":9000", nil)
+	err := http.ListenAndServe(fs.address, nil)
 	if err != nil {
 		log.Warn.Println("服务启动失败", err)
 	}
