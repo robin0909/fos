@@ -1,38 +1,44 @@
-// 提供 obj 的 api相关功能
+// 提供 web 的 api相关功能
 // obj的存储都是以 gzip 的格式
+
+// bucket 应该是放在数据库，做权限判断使用
 
 //  api 说明：
 //  PUT /objects/<bucket_name>/<obj_name>  		上传一个资源到服务器
 //  GET /objects/<bucket_name>/<obj_name>		获取一个网络资源
 
-package obj
+package web
 
 import (
+	"com.github/robin0909/fos/cluster"
 	"com.github/robin0909/fos/log"
+	"com.github/robin0909/fos/result"
 	"compress/gzip"
 	"errors"
+	"github.com/rs/xid"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
+	"time"
 )
 
 type FosServer struct {
-	dataDir string // 数据文件存放位置
-	address string
+	dataDir       string          // 数据文件存放位置
+	address       string          // 本服务地址
+	clusterServer *cluster.Server // 集群服务
 }
 
-func New(dataDir, address string) *FosServer {
-	return &FosServer{dataDir: dataDir, address: address}
+func New(dataDir, address string, clusterServer *cluster.Server) *FosServer {
+	return &FosServer{dataDir: dataDir, address: address, clusterServer: clusterServer}
 }
 
-// 运行 obj api 服务
-func (fs *FosServer) RunFos() {
-	// restful obj api
-	http.HandleFunc("/objects/", fs.handleObjects)
-	// restful bucket api
-	http.HandleFunc("/bucket/", fs.handleBucket)
+// 运行 web api 服务
+func (fs *FosServer) RunWeb() {
+	// restful web api
+	http.HandleFunc("/objects/", fs.objectsHandle)
 	err := http.ListenAndServe(fs.address, nil)
 	if err != nil {
 		log.Warn.Println("服务启动失败", err)
@@ -40,15 +46,14 @@ func (fs *FosServer) RunFos() {
 }
 
 // 对象存储相关api
-func (fs *FosServer) handleObjects(writer http.ResponseWriter, request *http.Request) {
+func (fs *FosServer) objectsHandle(writer http.ResponseWriter, request *http.Request) {
 	method := request.Method
-
 	switch method {
 	case http.MethodPut:
 		fs.putObj(writer, request)
 		return
 	case http.MethodGet:
-		fs.getObj(writer, request)
+		fs.getLocalObj(writer, request)
 		return
 	case http.MethodDelete:
 		fs.delObj(writer, request)
@@ -60,13 +65,15 @@ func (fs *FosServer) handleObjects(writer http.ResponseWriter, request *http.Req
 	}
 }
 
-// put obj
+// put 文件对象
 func (fs *FosServer) putObj(writer http.ResponseWriter, request *http.Request) {
-	bucketName, objName, err := parseObjMeta(request.URL)
+	bucketName, objName, err := parseUrlMeta(request.URL)
 	if err != nil {
 		writer.WriteHeader(http.StatusBadRequest)
 		return
 	}
+
+	fs.createBucket(bucketName)
 	f, err := fs.createFile(bucketName, objName)
 	if err != nil {
 		log.Warn.Println("打开文件失败", err)
@@ -76,17 +83,18 @@ func (fs *FosServer) putObj(writer http.ResponseWriter, request *http.Request) {
 	defer f.Close()
 	gw := gzip.NewWriter(f)
 
-	io.Copy(gw, request.Body)
-	writer.Write(ResultOk())
+	_, _ = io.Copy(gw, request.Body)
+	_, _ = writer.Write(result.ResultOk())
 }
 
-// get obj
-func (fs *FosServer) getObj(writer http.ResponseWriter, request *http.Request) {
-	bucketName, objName, err := parseObjMeta(request.URL)
+// get 文件对象
+func (fs *FosServer) getLocalObj(writer http.ResponseWriter, request *http.Request) {
+	bucketName, objName, err := parseUrlMeta(request.URL)
 	if err != nil {
 		writer.WriteHeader(http.StatusBadRequest)
 		return
 	}
+
 	f, err := fs.openFile(bucketName, objName)
 	if err != nil {
 		log.Warn.Println("打开文件失败", err)
@@ -103,38 +111,74 @@ func (fs *FosServer) getObj(writer http.ResponseWriter, request *http.Request) {
 	io.Copy(writer, gr)
 }
 
-// del obj
-func (fs *FosServer) delObj(writer http.ResponseWriter, request *http.Request) {
-	bucketName, objName, err := parseObjMeta(request.URL)
+// 在整个集群里寻找 obj
+func (fs *FosServer) getGlobeObj(writer http.ResponseWriter, request *http.Request) {
+	bucketName, objName, err := parseUrlMeta(request.URL)
 	if err != nil {
 		writer.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
-	err = os.Remove(fs.dataDir + "/" + bucketName + "/" + objName + ".gzip")
-	if err != nil {
-		log.Warn.Println("删除obj失败", err)
-		writer.WriteHeader(http.StatusInternalServerError)
-		writer.Write(ResultMessage("删除失败"))
+	id := xid.New().String()
+	var addressChan = make(chan string)
+	// 设置 30s 超时时间
+	var timeoutChan = time.After(time.Second * 30)
+	fs.clusterServer.LocateSource(id, bucketName, objName, addressChan)
+
+	var address string
+	select {
+	case <-timeoutChan:
+		// 在30s 内未拿到数据，超时结束，默认没有定位到资源
+		cluster.RemoveIdSource(id)
+		close(addressChan)
+	case address = <-addressChan:
+		// 定位到资源
+	}
+
+	if address == "" {
+		writer.WriteHeader(http.StatusNotFound)
 		return
 	}
 
-	writer.Write(ResultOk())
+	// 去远程调取资源
+
 }
 
+// del 文件对象
+func (fs *FosServer) delObj(writer http.ResponseWriter, request *http.Request) {
+	bucketName, objName, err := parseUrlMeta(request.URL)
+	if err != nil {
+		writer.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	err = os.Remove(filepath.Join(fs.dataDir, bucketName, objName+".gzip"))
+	if err != nil {
+		log.Warn.Println("删除obj失败", err)
+		writer.WriteHeader(http.StatusInternalServerError)
+		writer.Write(result.ResultMessage("删除失败"))
+		return
+	}
+
+	_, _ = writer.Write(result.ResultOk())
+}
+
+// 在 bucket 下创建一个文件
 func (fs *FosServer) createFile(bucketName, objName string) (*os.File, error) {
 	log.Info.Printf("open file bucketName = [%s], objName = [%s]", bucketName, objName)
-	f, err := os.Create(fs.dataDir + "/" + bucketName + "/" + objName + ".gzip")
+	f, err := os.Create(filepath.Join(fs.dataDir, bucketName, objName+".gzip"))
 	return f, err
 }
 
+// 打开一个 bucket 下的文件
 func (fs *FosServer) openFile(bucketName, objName string) (*os.File, error) {
 	log.Info.Printf("open file bucketName = [%s], objName = [%s]", bucketName, objName)
-	f, err := os.Open(fs.dataDir + "/" + bucketName + "/" + objName + ".gzip")
+	f, err := os.Open(filepath.Join(fs.dataDir, bucketName, objName+".gzip"))
 	return f, err
 }
 
-func parseObjMeta(url *url.URL) (bucketName, objName string, err error) {
+// 解析 url 中的参数
+func parseUrlMeta(url *url.URL) (bucketName, objName string, err error) {
 	paths := strings.Split(url.EscapedPath(), "/")
 	if len(paths) != 4 {
 		err = errors.New("url error")
@@ -145,63 +189,13 @@ func parseObjMeta(url *url.URL) (bucketName, objName string, err error) {
 	return
 }
 
-// bucket 操作相关api
-func (fs *FosServer) handleBucket(writer http.ResponseWriter, request *http.Request) {
-	method := request.Method
-	if method == http.MethodPut || method == http.MethodPost {
-		// 创建bucket
-		fs.createBucket(writer, request)
-	} else if method == http.MethodDelete {
-		// 删除bucket
-		fs.deleteBucket(writer, request)
-	} else {
-		writer.WriteHeader(http.StatusNotFound)
+// 创建 bucket
+// 如果存在就什么都不做
+func (fs *FosServer) createBucket(bucket string) {
+	path := filepath.Join(fs.dataDir, bucket)
+	fileInfo, err := os.Stat(path)
+	if os.IsNotExist(err) || !fileInfo.IsDir() {
+		err = os.Mkdir(path, 0777)
+		log.FailOnWarn(err, "创建bucket失败")
 	}
-}
-
-func (fs *FosServer) createBucket(w http.ResponseWriter, r *http.Request) {
-	bucketName, err := parseBucketName(r.URL)
-	if err != nil {
-		log.Warn.Printf("url error, %s", r.URL)
-		w.WriteHeader(http.StatusNotFound)
-		return
-	}
-
-	err = os.Mkdir(fs.dataDir+"/"+bucketName, 0777)
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		log.Warn.Printf("创建bucket失败, buckect=%s, err=%s", bucketName, err)
-		w.Write(ResultMessage("创建bucket失败"))
-		return
-	}
-
-	w.Write(ResultOk())
-}
-
-func (fs *FosServer) deleteBucket(w http.ResponseWriter, r *http.Request) {
-	bucketName, err := parseBucketName(r.URL)
-	if err != nil {
-		log.Warn.Printf("url error, %s", r.URL)
-		w.WriteHeader(http.StatusNotFound)
-		return
-	}
-
-	err = os.Remove(fs.dataDir + "/" + bucketName)
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		log.Warn.Printf("删除bucket失败, buckect=%s, err=%s", bucketName, err)
-		w.Write(ResultMessage("删除bucket失败"))
-		return
-	}
-
-	w.Write(ResultOk())
-}
-
-func parseBucketName(url *url.URL) (string, error) {
-	paths := strings.Split(url.EscapedPath(), "/")
-	if len(paths) != 3 {
-		return "", errors.New("url error")
-	}
-
-	return paths[2], nil
 }

@@ -1,4 +1,4 @@
-package obj
+package result
 
 import (
 	"com.github/robin0909/fos/log"

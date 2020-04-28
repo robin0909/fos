@@ -1,0 +1,7 @@
+amqp:
+  uri: amqp://guest:guest@127.0.0.1:5672/test
+  heartExchange: fos.heart.exchange             # topic
+  heartRouteKey: fos.heart.route.key
+  locateExchange: fos.locate.exchange           # topic
+  locateBackExchange: fos.locate.back.exchange  # direct
+  locateRouteKey: fos.locate.route.key

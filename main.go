@@ -1,34 +1,46 @@
 package main
 
 import (
+	"com.github/robin0909/fos/cluster"
 	"com.github/robin0909/fos/log"
-	"com.github/robin0909/fos/mq"
-	"com.github/robin0909/fos/obj"
-	"fmt"
-	"os"
+	"com.github/robin0909/fos/web"
+	"flag"
+)
+
+var (
+	dataDir    string
+	serverType string // store or web
+	configFile string
+	address    string // 0.0.0.0:8080
 )
 
 func main() {
+	parseFlag()
+	startFos()
+}
 
-	var consumer mq.DefaultConsumer
-	mq.Receive(&consumer)
+func parseFlag() {
+	flag.StringVar(&dataDir, "dataDir", "/tmp/data", "配置服务文件数据目录")
+	flag.StringVar(&serverType, "serverType", "store", "服务类型（web or store）")
+	flag.StringVar(&configFile, "configFile", "./config.yml", "配置文件路径")
+	flag.StringVar(&address, "address", ":8080", "服务器主机地址和端口")
+	// 解析
+	flag.Parse()
 
-	for i := 0; i < 10; i++ {
-		mq.Push(fmt.Sprintf("index = %d", i))
-	}
+	log.Info.Printf(`
+	fos server config list:
+	dataDir:       %s
+	serverType:    %s
+	configFile:    %s\n`,
+		dataDir, serverType, configFile)
+}
 
-	var dataDir string
-	args := os.Args
-	if len(args) >= 2 {
-		dataDir = args[1]
-	} else {
-		dataDir = "/tmp/data"
-	}
+func startFos() {
+	// 服务心跳检测
+	c := cluster.New(configFile, address, dataDir)
+	c.Start()
 
-	log.Info.Println(`welcome fos for obj or object system`)
-	log.Info.Println(`data-dir: ` + dataDir)
-
-	server := obj.New(dataDir)
-	server.RunFos()
-
+	// 启动 web api
+	server := web.New(dataDir, address, c)
+	server.RunWeb()
 }
