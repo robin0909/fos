@@ -17,14 +17,12 @@ import (
 	"com.github/robin0909/fos/src/stream"
 	"compress/gzip"
 	"errors"
-	"github.com/rs/xid"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 )
 
 type FosServer struct {
@@ -130,27 +128,11 @@ func (fs *FosServer) getLocalObj(writer http.ResponseWriter, bucketName, objName
 // 获取远程的资源
 func (fs *FosServer) getRemoteObj(writer http.ResponseWriter, bucketName, objName string) {
 
-	id := xid.New().String()
-	var addressChan = make(chan string)
-	// 设置 30s 超时时间
-	var timeoutChan = time.After(time.Second * 30)
-	fs.clusterServer.LocateSource(id, bucketName, objName, addressChan)
-
-	var address string
-	select {
-	case <-timeoutChan:
-		// 在30s 内未拿到数据，超时结束，默认没有定位到资源
-		cluster.RemoveIdSource(id)
-		close(addressChan)
-	case address = <-addressChan:
-		// 定位到资源
-	}
-
+	address := resource.FindClusterResource(fs.clusterServer, bucketName, objName)
 	if address == "" {
 		writer.WriteHeader(http.StatusNotFound)
 		return
 	}
-
 	// 去远程调取资源
 	getStream, err := stream.New(address, bucketName, objName)
 	if err != nil {
