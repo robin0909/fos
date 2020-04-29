@@ -113,6 +113,9 @@ func (a *Amqp) locateBroadcastListen(dataDir, address string) {
 		for d := range consume {
 			var locate Locate
 			_ = json.Unmarshal(d.Body, &locate)
+			if locate.LocateRouteKey == locateBakRandomKey {
+				continue
+			}
 			log.Info.Println("收到广播定位消息 locate: ", locate)
 			if resource.IsExistResourceObj(dataDir, locate.Bucket, locate.Obj) {
 				log.Info.Println("在本主机上定位到资源 locate: ", locate)

@@ -128,7 +128,7 @@ func (fs *FosServer) getLocalObj(writer http.ResponseWriter, bucketName, objName
 // 获取远程的资源
 func (fs *FosServer) getRemoteObj(writer http.ResponseWriter, bucketName, objName string) {
 
-	address := resource.FindClusterResource(fs.clusterServer, bucketName, objName)
+	address := cluster.FindClusterResource(fs.clusterServer, bucketName, objName)
 	if address == "" {
 		writer.WriteHeader(http.StatusNotFound)
 		return
