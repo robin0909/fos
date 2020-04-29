@@ -1,7 +1,7 @@
 package cluster
 
 import (
-	"com.github/robin0909/fos/log"
+	"com.github/robin0909/fos/src/log"
 	"github.com/streadway/amqp"
 	"gopkg.in/yaml.v2"
 	"io/ioutil"

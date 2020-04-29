@@ -10,9 +10,11 @@
 package web
 
 import (
-	"com.github/robin0909/fos/cluster"
-	"com.github/robin0909/fos/log"
-	"com.github/robin0909/fos/result"
+	"com.github/robin0909/fos/src/cluster"
+	"com.github/robin0909/fos/src/log"
+	"com.github/robin0909/fos/src/resource"
+	"com.github/robin0909/fos/src/result"
+	"com.github/robin0909/fos/src/stream"
 	"compress/gzip"
 	"errors"
 	"github.com/rs/xid"
@@ -53,7 +55,8 @@ func (fs *FosServer) objectsHandle(writer http.ResponseWriter, request *http.Req
 		fs.putObj(writer, request)
 		return
 	case http.MethodGet:
-		fs.getLocalObj(writer, request)
+		// fs.getLocalObj(writer, request)
+		fs.getGlobeObj(writer, request)
 		return
 	case http.MethodDelete:
 		fs.delObj(writer, request)
@@ -87,13 +90,26 @@ func (fs *FosServer) putObj(writer http.ResponseWriter, request *http.Request) {
 	_, _ = writer.Write(result.ResultOk())
 }
 
-// get 文件对象
-func (fs *FosServer) getLocalObj(writer http.ResponseWriter, request *http.Request) {
+// 在整个集群里寻找 obj
+func (fs *FosServer) getGlobeObj(writer http.ResponseWriter, request *http.Request) {
 	bucketName, objName, err := parseUrlMeta(request.URL)
 	if err != nil {
 		writer.WriteHeader(http.StatusBadRequest)
 		return
 	}
+
+	// 本地是否存在
+	if resource.IsExistResourceObj(fs.dataDir, bucketName, objName) {
+		fs.getLocalObj(writer, bucketName, objName)
+	} else {
+		// 如果本地不存在就去远程查找
+		fs.getRemoteObj(writer, bucketName, objName)
+	}
+
+}
+
+// get 文件对象
+func (fs *FosServer) getLocalObj(writer http.ResponseWriter, bucketName, objName string) {
 
 	f, err := fs.openFile(bucketName, objName)
 	if err != nil {
@@ -111,13 +127,8 @@ func (fs *FosServer) getLocalObj(writer http.ResponseWriter, request *http.Reque
 	io.Copy(writer, gr)
 }
 
-// 在整个集群里寻找 obj
-func (fs *FosServer) getGlobeObj(writer http.ResponseWriter, request *http.Request) {
-	bucketName, objName, err := parseUrlMeta(request.URL)
-	if err != nil {
-		writer.WriteHeader(http.StatusBadRequest)
-		return
-	}
+// 获取远程的资源
+func (fs *FosServer) getRemoteObj(writer http.ResponseWriter, bucketName, objName string) {
 
 	id := xid.New().String()
 	var addressChan = make(chan string)
@@ -141,7 +152,14 @@ func (fs *FosServer) getGlobeObj(writer http.ResponseWriter, request *http.Reque
 	}
 
 	// 去远程调取资源
+	getStream, err := stream.New(address, bucketName, objName)
+	if err != nil {
+		log.FailOnWarn(err, "获取远程的数据流失败")
+		writer.WriteHeader(http.StatusInternalServerError)
+		return
+	}
 
+	io.Copy(writer, getStream)
 }
 
 // del 文件对象

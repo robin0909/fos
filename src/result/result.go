@@ -1,7 +1,7 @@
 package result
 
 import (
-	"com.github/robin0909/fos/log"
+	"com.github/robin0909/fos/src/log"
 	"encoding/json"
 	"fmt"
 )

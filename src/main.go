@@ -1,9 +1,9 @@
 package main
 
 import (
-	"com.github/robin0909/fos/cluster"
-	"com.github/robin0909/fos/log"
-	"com.github/robin0909/fos/web"
+	"com.github/robin0909/fos/src/cluster"
+	"com.github/robin0909/fos/src/log"
+	"com.github/robin0909/fos/src/web"
 	"flag"
 )
 
@@ -31,8 +31,9 @@ func parseFlag() {
 	fos server config list:
 	dataDir:       %s
 	serverType:    %s
-	configFile:    %s\n`,
-		dataDir, serverType, configFile)
+	configFile:    %s
+	address:       %s`,
+		dataDir, serverType, configFile, address)
 }
 
 func startFos() {

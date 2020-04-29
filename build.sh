@@ -1,0 +1,1 @@
+go build -o bin/fos src/main.go

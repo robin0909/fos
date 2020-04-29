@@ -1,8 +1,8 @@
 package cluster
 
 import (
-	"com.github/robin0909/fos/log"
-	"com.github/robin0909/fos/utils"
+	"com.github/robin0909/fos/src/log"
+	"com.github/robin0909/fos/src/utils"
 	"github.com/rs/xid"
 	"github.com/streadway/amqp"
 	"sync"
