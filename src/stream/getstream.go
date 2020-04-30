@@ -11,7 +11,7 @@ type GetStream struct {
 	reader io.Reader
 }
 
-func New(address, bucket, obj string) (*GetStream, error) {
+func NewGetStream(address, bucket, obj string) (*GetStream, error) {
 
 	url := strings.Join([]string{"http:/", address, "objects", bucket, obj}, "/")
 	r, err := http.Get(url)

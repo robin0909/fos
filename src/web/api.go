@@ -134,7 +134,7 @@ func (fs *FosServer) getRemoteObj(writer http.ResponseWriter, bucketName, objNam
 		return
 	}
 	// 去远程调取资源
-	getStream, err := stream.New(address, bucketName, objName)
+	getStream, err := stream.NewGetStream(address, bucketName, objName)
 	if err != nil {
 		log.FailOnWarn(err, "获取远程的数据流失败")
 		writer.WriteHeader(http.StatusInternalServerError)

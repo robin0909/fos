@@ -7,7 +7,7 @@ import (
 
 func TestGet(t *testing.T) {
 
-	s, err := stream.New("192.168.31.234:8083", "media", "demo.pdf")
+	s, err := stream.NewGetStream("192.168.31.234:8083", "media", "demo.pdf")
 	if err != nil {
 		t.Error("error", err)
 		return

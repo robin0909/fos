@@ -9,6 +9,7 @@ import (
 	"github.com/streadway/amqp"
 	"strings"
 	"sync"
+	"time"
 )
 
 type Locate struct {
@@ -36,6 +37,26 @@ func (s *Server) runLocate() {
 	s.Amq.locateListen()
 	// 监听广播查找资源消息
 	s.Amq.locateBroadcastListen(s.dataDir, s.address)
+}
+
+// 从集群中寻找 obj 资源
+func FindClusterResource(cs *Server, bucketName, objName string) (address string) {
+
+	id := xid.New().String()
+	var addressChan = make(chan string)
+	// 设置 30s 超时时间
+	var timeoutChan = time.After(time.Second * 30)
+	cs.LocateSource(id, bucketName, objName, addressChan)
+
+	select {
+	case <-timeoutChan:
+		// 在30s 内未拿到数据，超时结束，默认没有定位到资源
+	case address = <-addressChan:
+		// 定位到资源
+	}
+	RemoveIdSource(id)
+	close(addressChan)
+	return
 }
 
 // 定位资源在那个节点
